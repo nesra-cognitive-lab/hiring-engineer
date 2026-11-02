@@ -7,7 +7,6 @@
 Thank you for your interest in joining Nesra. This task is a small, realistic version of a problem we solve every day. We want to see how you think, not how many hours you can spend.
 
 - **Timebox:** about 3 to 4 hours of work.
-- **Deadline:** 48 hours after you receive this task.
 - **Unfinished is OK.** If you run out of time, write down what is missing and how you would finish it.
 
 ## 2. About Nesra Scale
@@ -128,7 +127,7 @@ Your README must include these sections:
 
 ## 10. AI tools
 
-AI tools (ChatGPT, Claude, Copilot, Cursor and others) are **allowed and expected**. We use them every day.
+AI tools (Codex, Claude Code, Cursor and others) are **allowed and expected**. We use them every day.
 
 - Add a short note in your README on **how** you used them: which tools, for which parts, and what you changed or fixed yourself.
 - You must be able to **explain and modify any line** of your code live in the interview.
@@ -139,8 +138,8 @@ We will talk about your AI workflow in the interview, not in this task.
 
 - Start from this repository: click **Use this template** on GitHub to create your own copy. It includes the data and `measure.py`.
 - Push your work to a **GitHub repository**. It needs to be public.
-- **Reply to the email this task came with** and include the repository link.
-- Submit within **48 hours** of receiving the task.
+- **Explain about your work** and why you choose to do that way in short video (loom, kommodo, etc).
+- **Inform to the email / whatsapp this task came with** and include the repository link and short video link.
 
 ## 12. How we evaluate
 
@@ -159,7 +158,6 @@ We value **clear thinking and honest trade-offs** more than lots of features.
 If your submission is a good fit, we will invite you to a **60-minute interview**:
 
 - You walk us through your solution.
-- We extend it together live (a small new requirement).
 - We discuss how you work with AI tools.
 
 ## 14. Questions
