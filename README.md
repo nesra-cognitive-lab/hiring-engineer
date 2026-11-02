@@ -6,7 +6,8 @@
 
 Thank you for your interest in joining Nesra. This task is a small, realistic version of a problem we solve every day. We want to see how you think, not how many hours you can spend.
 
-- **Timebox:** about 3 to 4 hours of work.
+- **Timebox:** about 2 to 3 hours of work. We give you a working starter, so your time goes into the interesting part: caching and invalidation.
+- **Suggested split:** 30 minutes looking at the data, 90 minutes on the cache and invalidation, 30 minutes on your README.
 - **Unfinished is OK.** If you run out of time, write down what is missing and how you would finish it.
 
 ## 2. About Nesra Scale
@@ -19,59 +20,48 @@ In production we use **BigQuery + dbt** for data, **Prefect** for pipelines, and
 
 ## 3. The data
 
-Data files: see [`data/`](data/) in this repository. The CSV files are gzip-compressed, and DuckDB reads `.csv.gz` directly.
+The data is in [`data/`](data/). One row is one product in one shop on one day. The column names, types and meanings are in [`data/data_dictionary.md`](data/data_dictionary.md).
 
-- **`data/shops_90d.csv.gz`** - about 500 shops x 90 days of daily shop and product sales data. It is based on real data, but masked (names and IDs are changed).
-- **`data/delta.csv.gz`** - new data that arrived after the first load. It contains new days, and also some **late corrections to older days**.
-- **`data/data_dictionary.md`** - the exact column names, types and meanings.
-
-Expected columns (one row = one product in one shop on one day):
-
-| Column | Meaning |
-| :---- | :---- |
-| shop_id | Unique ID of the shop |
-| shop_name | Shop display name |
-| platform | Marketplace: TikTok Shop, Shopee or Tokopedia |
-| date | Calendar date of activity (YYYY-MM-DD) |
-| product_id | Unique ID of the product listing |
-| product_name | Product display name |
-| category | Product category |
-| price | Average selling price per unit that day (Rp) |
-| units_sold | Number of units sold that day |
-| orders | Number of orders containing the product that day |
-| revenue | Revenue that day (Rp), price x units_sold |
-| ad_spend | Advertising spend attributed to the product that day (Rp) |
-| views | Product impressions that day |
-| clicks | Product clicks (detail-page visits) that day |
-
-*Note: exact columns are in `data/data_dictionary.md`.*
+- **`shops_90d.csv.gz`** - 500 shops x 90 days of daily product sales, 21 December 2024 to 20 March 2025. It is based on real data, but masked (names, IDs and amounts are changed).
+- **`delta.csv.gz`** - new data that arrives after the first load. It contains new days, and also some **late corrections to older days**.
 
 **The data is real-world messy.** Look at it carefully before you trust it. Handle any problems in a sensible way, and write down what you found and what you decided.
 
-## 4. What to build
+## 4. The starter
 
-Build a small service that runs on your laptop and has this endpoint:
+The repository is a working Python service. You need [uv](https://docs.astral.sh/uv/) installed.
+
+```
+./run.sh                 # starts the service on http://localhost:8000
+uv run pytest            # runs the tests
+```
+
+| File | What it is |
+| :---- | :---- |
+| `app/raw.py` | **Done.** Loads the raw data, provides `scan_raw()`, and counts the scan cost. |
+| `app/main.py` | **Done.** The HTTP routes. |
+| `app/reports.py` | **Your work.** Three empty functions: `startup()`, `weekly_report()` and `on_delta_loaded()`. |
+| `tests/` | One example test to start from. |
+
+You can add files and helpers, and change the starter if you have a good reason. Say why in your README.
+
+## 5. What to build
+
+The service has this endpoint:
 
 ```
 GET /shops/{shop_id}/weekly-report?week=YYYY-Www
 ```
 
-`week` is an ISO week, for example `2025-W11`.
+`week` is an ISO week, for example `2025-W11`. The JSON response must include:
 
-The response must include:
+| Field | Type | Meaning |
+| :---- | :---- | :---- |
+| `revenue` | integer | Total revenue of the shop in that week |
+| `units` | integer | Total units sold in that week |
+| `revenue_wow_pct` | number or `null` | Week-over-week change in revenue, in percent |
 
-| Field | Description |
-| :---- | :---- |
-| Revenue | Total revenue for the week |
-| Units | Total units sold for the week |
-| Week-over-week change | Change in revenue and units compared with the previous week |
-| Top 5 products | The 5 best products of the week (explain how you rank them) |
-| ROAS | Return on ad spend = revenue / ad_spend |
-| Summary | A short plain-language summary of the week, for a brand owner |
-
-The summary can come from a simple template. If you want, you can use an LLM instead, but this is **optional** and you do not need an API key. A good template is completely fine.
-
-The JSON must include these top-level fields: `revenue` and `units` (integers), and `revenue_wow_pct` (a number, or `null`). You decide the rest of the format and how you handle other edge cases. Explain your choices in the README.
+Nothing else is required. Do not spend time on extra fields.
 
 These rules are fixed, because `measure.py` checks them:
 
@@ -80,91 +70,72 @@ These rules are fixed, because `measure.py` checks them:
 - **A shop with no rows in a week** gets `revenue: 0` and `units: 0`, not an error.
 - **`revenue_wow_pct`** is `100 * (this week - previous week) / previous week`, using revenue. It is `null` when there is no previous week **or** when the previous week's revenue is 0.
 
-## 5. Pretend the database is expensive
+## 6. Pretend the database is expensive
 
-In this task, reading raw data is "expensive", like BigQuery.
+In this task, reading raw data is "expensive", like BigQuery. `app/raw.py` already handles this for you:
 
-- **All reads of raw data must go through one single function** (for example `scan_raw(...)`).
-- That function must **log a simulated scan cost**: rows scanned x Rp 0.05 (a placeholder rate). Like a BigQuery table partitioned by date, a scan pays for every row in each date it reads, for all shops, even if you only need one shop.
-- Your service must report the running totals at `GET /stats` as `{"rows_scanned": N, "cost_rp": N}`.
+- **`scan_raw(source, dates)` is the only way to read raw rows.** Do not read the raw tables or the CSV files anywhere else.
+- Like a BigQuery table partitioned by date, a scan pays for **every row on each date it reads, for all shops**, even if you only need one shop. The rate is Rp 0.05 per row.
+- Every scan is logged, and `GET /stats` returns the running totals.
 
-Do not read raw data anywhere else. Reads from your own cache or precomputed tables do not count as raw scans. Your cache must hold aggregated results (for example per shop and week), not a copy of the raw rows.
+Reads from your own cache tables are free. Your cache must be **DuckDB tables holding aggregated results** (for example per shop and day, or per shop and week), not a copy of the raw rows.
 
-## 6. Budget goal
+## 7. Budget goal
 
-Imagine this production load:
+Imagine this production load: a weekly report for **all 500 shops, every day, for one month**, each requested **20 times a day** (users refresh, share, open on mobile, and so on).
 
-- A weekly report is served for **all 500 shops, every day, for one month**.
-- Each report is requested **20 times a day** (users refresh, share, open on mobile, and so on).
-
-Your goal is to make this as cheap as possible. **To measure it, run [`measure.py`](measure.py) (in this repository) against your service. It requests weekly reports for every shop, calls `POST /load-delta`, requests them again, checks the answers and reads `GET /stats`. Target: under Rp 40,000 in total on that run. For scale, scanning raw data on every request costs tens of millions.**
-
-Run it against a **freshly started** service, because the counters at `GET /stats` must start from zero. `measure.py` declares its own dependencies (PEP 723), so with [uv](https://docs.astral.sh/uv/) installed you only need:
+`measure.py` simulates a small version of this. It requests weekly reports for every shop, calls `POST /load-delta`, requests them again, checks every answer and reads `GET /stats`. Run it against a **freshly started** service, because the cost counters start from zero:
 
 ```
-uv run measure.py --url http://localhost:8000
+./run.sh                                      # in one terminal
+uv run measure.py --url http://localhost:8000 # in another
 ```
 
 It prints a scorecard and writes the details to `measure_result.json`.
 
-Show your math in the README: the cost **before** caching (naive approach) and **after** caching, using the numbers `measure.py` reports.
+**Target: the run passes, with a total under Rp 40,000.** For scale, scanning raw data on every request costs tens of millions. Cheaper is better.
 
-## 7. Cache invalidation (the important part)
+## 8. Cache invalidation (the important part)
 
-New data arrives after reports are already cached. You must:
+New data arrives after reports are already cached. When `POST /load-delta` is called, the starter makes the delta available as source `"delta"` and calls your `on_delta_loaded()`. You must:
 
-1. Load `delta.csv.gz` when `POST /load-delta` is called. Return only when your reports are up to date.
-2. Show that **affected reports refresh** and return the new correct numbers. This includes reports for **older weeks** that changed because of late corrections.
-3. Show that **unaffected reports stay cached** and cost **nothing** to serve again.
+1. Return only when your reports are up to date.
+2. Make **affected reports refresh** with the new correct numbers. This includes reports for **older weeks** that changed because of late corrections.
+3. Keep **unaffected reports cached**, so they cost **nothing** to serve again.
 
-A short demo script, test, or log output that proves this is very welcome.
+A short test or log output that proves this is very welcome.
 
-## 8. Constraints
+## 9. Your README
 
-- **One command to run:** `docker compose up` or one script (for example `./run.sh`).
-- **Any language.** We prefer Python or TypeScript.
-- **Store:** DuckDB.
-- **Cache: DuckDB tables only, holding aggregated results.**
-- **No cloud account needed.** Everything must run locally.
+Replace this file with your own README. Keep it short; one page is enough. It must include:
 
-## 9. README requirements
-
-Your README must include these sections:
-
-- **Setup** - how to run it with one command, and how to call the endpoint.
-- **Cache design** - what is cached, the cache keys, TTL vs event-based invalidation, and precompute vs on-demand.
-- **Cost math** - simulated numbers before vs after caching, for the budget scenario in section 6.
-- **When delta arrives** - step by step, what happens to the cache and the reports.
-- **Data issues found** - what problems you found in the data and how you handled them.
-- **Production mapping** - how your design would map to BigQuery + Cloudflare Workers.
-- **With more time** - what you would improve or do differently.
-- **AI tools note** - a short note on how you used AI tools (see below).
+- **Cache design** - what you cache, the cache keys, precompute or on-demand, and what happens step by step when the delta arrives.
+- **Cost** - the `measure.py` scorecard, and a rough estimate of what a naive version (no cache) would cost, so we can compare.
+- **Data issues** - what problems you found in the data and how you handled them.
+- **Notes** - how you used AI tools (see below), and anything unfinished.
 
 ## 10. AI tools
 
 AI tools (Codex, Claude Code, Cursor and others) are **allowed and expected**. We use them every day.
 
-- Add a short note in your README on **how** you used them: which tools, for which parts, and what you changed or fixed yourself.
+- In your README, say **how** you used them: which tools, for which parts, and what you changed or fixed yourself.
 - You must be able to **explain and modify any line** of your code live in the interview.
-
-We will talk about your AI workflow in the interview, not in this task.
 
 ## 11. How to submit
 
-- Start from this repository: click **Use this template** on GitHub to create your own copy. It includes the data and `measure.py`.
-- Push your work to a **GitHub repository**. It needs to be public.
-- **Explain about your work** and why you choose to do that way in short video (loom, kommodo, etc).
-- **Inform to the email / whatsapp this task came with** and include the repository link and short video link.
+- Start from this repository: click **Use this template** on GitHub to create your own copy.
+- Push your work to a **public GitHub repository**.
+- Send the repository link to the email or WhatsApp this task came with.
 
 ## 12. How we evaluate
 
 | Area | Weight | What we look for |
 | :---- | :---- | :---- |
-| Cache design & invalidation correctness | 35% | Sensible keys, precise invalidation (including late corrections), no stale reports, unaffected reports stay cached |
-| Cost reasoning & measured savings | 25% | Clear before/after math, real measured numbers, smart choices to reduce scans |
-| Code quality & correctness of metrics | 20% | Readable code, correct revenue, units, WoW, top 5 and ROAS, reasonable tests |
+| Cache design & invalidation correctness | 40% | Sensible keys, precise invalidation (including late corrections), no stale reports, unaffected reports stay cached |
+| Cost | 25% | A passing `measure.py` run, smart choices to reduce scans, clear comparison with a naive version |
+| Code quality & correctness | 15% | Readable code, correct revenue, units and WoW, a test that shows invalidation works |
 | Data-issue handling | 10% | You noticed real problems, handled them sensibly, and documented your decisions |
-| README communication | 10% | Clear, honest and easy to follow, including trade-offs and what is unfinished |
+| README communication | 10% | Clear, honest and short, including trade-offs and what is unfinished |
 
 We value **clear thinking and honest trade-offs** more than lots of features.
 
