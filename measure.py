@@ -5,7 +5,7 @@
 """Run against a fresh service. Write measure_result.json in the current directory.
 
 Reference policy: exact deduplication, delta replacement by (shop, product, date),
-signed and zero amounts retained, and available calendar weeks including partial W12.
+other rows kept as delivered, and available calendar weeks including partial W12.
 WoW is 100 * (current - previous) / previous, or null for missing/zero previous
 revenue. Integers match exactly; percentages use absolute tolerance 0.01.
 Anomalies and their next-week dependencies receive numeric diagnostics only.
@@ -14,6 +14,7 @@ HTTP counters are self-reported; scan routing and aggregate-only storage need re
 """
 
 import argparse
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date
@@ -37,6 +38,28 @@ Report = tuple[int, int, float | None]
 Expected = Mapping[Key, Report]
 Ambiguous = Mapping[Key, tuple[str, ...]]
 FIELDS = ("revenue", "units", "revenue_wow_pct")
+DATA_SHA256 = {
+    "shops_90d.csv.gz": "2524b6c4ec36821fc1c97757a3ccbac9639cc7bbb7af5d0b74166552ccba766d",
+    "delta.csv.gz": "ca04709b1cbfbee44893f93e3b75beddb3691197ca17a964ea5f1130d9e3741c",
+}
+# Shop-weeks whose numbers depend on how a candidate handles anomalies other than
+# exact duplicates. Precomputed from the files pinned above, so the script does not
+# describe the anomalies. Shared by both phases; each phase uses its own weeks.
+DATA_ISSUE_WEEKS = {
+    "base": (
+        "SHP042488/2025-W08", "SHP042488/2025-W09", "SHP042488/2025-W10", "SHP042488/2025-W11",
+        "SHP042488/2025-W12", "SHP410771/2025-W08", "SHP468596/2025-W12", "SHP483681/2025-W08",
+        "SHP483681/2025-W09", "SHP483681/2025-W10", "SHP483681/2025-W11", "SHP483681/2025-W12",
+        "SHP860524/2025-W08", "SHP860524/2025-W09", "SHP860524/2025-W10", "SHP860524/2025-W11",
+        "SHP860524/2025-W12", "SHP980903/2025-W08", "SHP980903/2025-W09",
+    ),
+    "merged": (
+        "SHP042488/2025-W09", "SHP042488/2025-W10", "SHP042488/2025-W11", "SHP042488/2025-W12",
+        "SHP468596/2025-W12", "SHP483681/2025-W09", "SHP483681/2025-W10", "SHP483681/2025-W11",
+        "SHP483681/2025-W12", "SHP860524/2025-W09", "SHP860524/2025-W10", "SHP860524/2025-W11",
+        "SHP860524/2025-W12", "SHP980903/2025-W09",
+    ),
+}
 SCHEMA = {
     "shop_id": "VARCHAR", "shop_name": "VARCHAR", "platform": "VARCHAR",
     "date": "DATE", "product_id": "VARCHAR", "product_name": "VARCHAR",
@@ -71,7 +94,14 @@ class Observation:
     error: str | None
 
 
+def check_data(data: Path):
+    for filename, digest in DATA_SHA256.items():
+        if hashlib.sha256((data / filename).read_bytes()).hexdigest() != digest:
+            raise ValueError(f"{data / filename} differs from the published data file")
+
+
 def build_oracle(data: Path) -> Oracle:
+    check_data(data)
     with duckdb.connect() as db:
         for table, filename in (("base", "shops_90d.csv.gz"), ("delta", "delta.csv.gz")):
             db.read_csv(str(data / filename), header=True, columns=SCHEMA).create(table)
@@ -86,28 +116,12 @@ def build_oracle(data: Path) -> Oracle:
         shops = db.execute("SELECT count(DISTINCT shop_id) FROM base").fetchone()[0]
         if shops != 500:
             raise ValueError(f"expected 500 shops, found {shops}")
-        maps, kept_maps, reasons, counts = [], [], [], []
+        maps, kept_maps, reasons = [], [], []
         for table, first_week in (("base", "2025-02-17"), ("merged", "2025-02-24")):
             db.execute(f"""
                 CREATE OR REPLACE TEMP TABLE duplicates AS
                 SELECT *, count(*) AS copies FROM {table} GROUP BY ALL HAVING count(*) > 1;
-                CREATE OR REPLACE TEMP TABLE issues AS
-                SELECT shop_id, date, 'exact_duplicate' AS reason FROM duplicates
-                UNION ALL SELECT shop_id, date, 'negative_price_or_revenue' FROM {table}
-                    WHERE price < 0 OR revenue < 0
-                UNION ALL SELECT shop_id, date, 'zero_price_positive_units' FROM {table}
-                    WHERE price = 0 AND units_sold > 0
-                UNION ALL SELECT shop_id, date, 'blank_ad_spend' FROM {table}
-                    WHERE ad_spend IS NULL;
             """)
-            counts.append(dict(zip(
-                ("exact_duplicate_surplus", "negative_rows", "zero_price_rows", "blank_spend_rows"),
-                db.execute(f"""SELECT
-                    (SELECT coalesce(sum(copies - 1), 0) FROM duplicates),
-                    count(*) FILTER (WHERE price < 0 OR revenue < 0),
-                    count(*) FILTER (WHERE price = 0 AND units_sold > 0),
-                    count(*) FILTER (WHERE ad_spend IS NULL) FROM {table}""").fetchone(),
-            )))
             for distinct in ("DISTINCT", ""):
                 rows = db.execute(f"""
                     WITH weekly AS (
@@ -130,23 +144,25 @@ def build_oracle(data: Path) -> Oracle:
             rows = db.execute(f"""
                 WITH expanded AS (
                     SELECT shop_id, date_trunc('week', date)::DATE + offset_days::INTEGER AS week, reason
-                    FROM issues CROSS JOIN (VALUES (0), (7)) n(offset_days)
+                    FROM (SELECT shop_id, date, 'exact_duplicate' AS reason FROM duplicates)
+                CROSS JOIN (VALUES (0), (7)) n(offset_days)
                 )
                 SELECT shop_id, week, list(DISTINCT reason ORDER BY reason)
                 FROM expanded JOIN wanted USING (shop_id, week)
                 WHERE week >= DATE '{first_week}' GROUP BY ALL ORDER BY shop_id, week
             """).fetchall()
-            reasons.append(MappingProxyType({(s, w): tuple(r) for s, w, r in rows}))
+            found = {(s, w): set(r) for s, w, r in rows}
+            for key in report_map:
+                if name(key) in DATA_ISSUE_WEEKS[table]:
+                    found.setdefault(key, set()).add("data_issue")
+            reasons.append(MappingProxyType({k: tuple(sorted(found[k])) for k in sorted(found)}))
             kept_maps[-1] = MappingProxyType({
                 k: v for k, v in kept_maps[-1].items()
                 if "exact_duplicate" in reasons[-1].get(k, ())})
-        if counts[0] != dict(exact_duplicate_surplus=69, negative_rows=3,
-                             zero_price_rows=3, blank_spend_rows=3599):
-            raise ValueError(f"unexpected base anomaly counts: {counts[0]}")
         evidence = dict(zip(("base_physical_rows", "delta_physical_rows", "touched_base_rows"),
             db.execute("""SELECT (SELECT count(*) FROM base), (SELECT count(*) FROM delta),
                 (SELECT count(*) FROM base WHERE date IN (SELECT date FROM delta))""").fetchone()))
-        evidence.update(shops=shops, before_anomalies=counts[0], after_anomalies=counts[1])
+        evidence.update(shops=shops)
     return Oracle(*maps, *kept_maps, *reasons, evidence)
 
 

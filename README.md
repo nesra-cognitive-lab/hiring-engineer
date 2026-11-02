@@ -71,7 +71,14 @@ The response must include:
 
 The summary can come from a simple template. If you want, you can use an LLM instead, but this is **optional** and you do not need an API key. A good template is completely fine.
 
-The JSON must include these top-level fields: `revenue` and `units` (integers), and `revenue_wow_pct` (a number, or `null` when there is no previous week to compare). You decide the rest of the format and how you handle edge cases. Explain your choices in the README.
+The JSON must include these top-level fields: `revenue` and `units` (integers), and `revenue_wow_pct` (a number, or `null`). You decide the rest of the format and how you handle other edge cases. Explain your choices in the README.
+
+These rules are fixed, because `measure.py` checks them:
+
+- **Weeks** are ISO weeks, Monday to Sunday.
+- **Partial weeks count.** `shops_90d.csv.gz` ends on Thursday 20 March 2025, so `2025-W12` has only 4 days of data before the delta arrives. Return the totals of the days that exist. Do not return `null` or an error for an incomplete week.
+- **A shop with no rows in a week** gets `revenue: 0` and `units: 0`, not an error.
+- **`revenue_wow_pct`** is `100 * (this week - previous week) / previous week`, using revenue. It is `null` when there is no previous week **or** when the previous week's revenue is 0.
 
 ## 5. Pretend the database is expensive
 
@@ -92,6 +99,14 @@ Imagine this production load:
 
 Your goal is to make this as cheap as possible. **To measure it, run [`measure.py`](measure.py) (in this repository) against your service. It requests weekly reports for every shop, calls `POST /load-delta`, requests them again, checks the answers and reads `GET /stats`. Target: under Rp 40,000 in total on that run. For scale, scanning raw data on every request costs tens of millions.**
 
+Run it against a **freshly started** service, because the counters at `GET /stats` must start from zero. `measure.py` declares its own dependencies (PEP 723), so with [uv](https://docs.astral.sh/uv/) installed you only need:
+
+```
+uv run measure.py --url http://localhost:8000
+```
+
+It prints a scorecard and writes the details to `measure_result.json`.
+
 Show your math in the README: the cost **before** caching (naive approach) and **after** caching, using the numbers `measure.py` reports.
 
 ## 7. Cache invalidation (the important part)
@@ -108,7 +123,7 @@ A short demo script, test, or log output that proves this is very welcome.
 
 - **One command to run:** `docker compose up` or one script (for example `./run.sh`).
 - **Any language.** We prefer Python or TypeScript.
-- **Any local store:** DuckDB
+- **Store:** DuckDB.
 - **Cache: DuckDB tables only, holding aggregated results.**
 - **No cloud account needed.** Everything must run locally.
 
