@@ -137,6 +137,7 @@ We will talk about your AI workflow in the interview, not in this task.
 
 ## 11. How to submit
 
+- Start from this repository: click **Use this template** on GitHub to create your own copy. It includes the data and `measure.py`.
 - Push your work to a **GitHub repository**. It needs to be public.
 - **Reply to the email this task came with** and include the repository link.
 - Submit within **48 hours** of receiving the task.
