@@ -2,6 +2,11 @@
 
 The raw data and the cost counters live in module-level state, so all tests in
 one run share them. Compare /stats before and after a call to see what it cost.
+
+Each `TestClient(app)` block runs `startup()` again, but the delta stays loaded:
+only the first POST /load-delta in a run returns {"loaded": true}. If your
+startup() rebuilds the cache, make sure it still accounts for an already loaded
+delta, or keep all delta tests in one TestClient block.
 """
 
 from fastapi.testclient import TestClient

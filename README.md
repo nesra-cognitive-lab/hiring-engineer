@@ -93,7 +93,7 @@ uv run measure.py --url http://localhost:8000 # in another
 
 It prints a scorecard and writes the details to `measure_result.json`.
 
-**Target: the run passes, with a total under Rp 40,000.** For scale, scanning raw data on every request costs tens of millions. Cheaper is better.
+**Target: the run passes, with a total under Rp 20,000.** For scale, scanning raw data on every request costs tens of millions. Cheaper is better.
 
 ## 8. Cache invalidation (the important part)
 

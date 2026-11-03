@@ -11,6 +11,10 @@ revenue. Integers match exactly; percentages use absolute tolerance 0.01.
 Anomalies and their next-week dependencies receive numeric diagnostics only.
 Duplicate diagnostics compare removed/kept values with other reference choices fixed.
 HTTP counters are self-reported; scan routing and aggregate-only storage need review.
+Only W08-W12 reports (and their W07 baseline) are scored. Data issues on earlier
+dates do not affect the score; reviewers read the candidate's README for those.
+Cost is the service's lifetime counter, so startup precompute counts; the scorecard
+shows what was already spent before the first request of this run.
 """
 
 import argparse
@@ -38,6 +42,7 @@ Report = tuple[int, int, float | None]
 Expected = Mapping[Key, Report]
 Ambiguous = Mapping[Key, tuple[str, ...]]
 FIELDS = ("revenue", "units", "revenue_wow_pct")
+BUDGET_RP = Decimal(20000)
 DATA_SHA256 = {
     "shops_90d.csv.gz": "2524b6c4ec36821fc1c97757a3ccbac9639cc7bbb7af5d0b74166552ccba766d",
     "delta.csv.gz": "ca04709b1cbfbee44893f93e3b75beddb3691197ca17a964ea5f1130d9e3741c",
@@ -340,8 +345,9 @@ def print_scorecard(result: dict):
     print(f"MEASURE {'PASS' if result['pass'] else 'FAIL'} | fresh service required")
     if "cost" in result:
         c = result["cost"]
-        print(f"Cost Rp | phase1 {c['phase1_rp']:,.2f} | phase2 {c['phase2_rp']:,.2f} "
-              f"| total {c['total_rp']:,.2f} | budget <40,000 {'PASS' if c['budget_pass'] else 'FAIL'}")
+        print(f"Cost Rp | before run {c['before_run_rp']:,.2f} | phase1 {c['phase1_rp']:,.2f} "
+              f"| phase2 {c['phase2_rp']:,.2f} | total {c['total_rp']:,.2f} "
+              f"| budget <{BUDGET_RP:,} {'PASS' if c['budget_pass'] else 'FAIL'}")
     for label in ("before", "after"):
         if label not in result:
             continue
@@ -411,9 +417,10 @@ def main() -> int:
                 raise ValueError("stats counters decreased; use cumulative lifetime counters")
             snapshots.append(snapshot)
             result["stats"].append(dict(rows=snapshot.rows, cost_rp=str(snapshot.cost)))
-        phase1, total = snapshots[1].cost, snapshots[2].cost
-        result["cost"] = dict(phase1_rp=float(phase1), phase2_rp=float(total - phase1),
-                              total_rp=float(total), budget_pass=total < Decimal(40000))
+        initial, phase1, total = snapshots[0].cost, snapshots[1].cost, snapshots[2].cost
+        result["cost"] = dict(before_run_rp=float(initial), phase1_rp=float(phase1 - initial),
+                              phase2_rp=float(total - phase1), total_rp=float(total),
+                              budget_pass=total < BUDGET_RP)
         result["pass"] = result["cost"]["budget_pass"] and result["before"]["correct"] and result["after"]["correct"]
         result["efficiency"] = "within scan budget" if result["cost"]["budget_pass"] else "raw reads exceed scan budget"
     except (ValueError, OSError, duckdb.Error, OverflowError) as exc:

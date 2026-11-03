@@ -6,10 +6,10 @@ Daily e-commerce performance for about 500 online shops selling mostly beauty an
 
 | File | Contents |
 |---|---|
-| `shops_90d.csv` | 90 consecutive days of history, 2024-12-21 to 2025-03-20. |
-| `delta.csv` | The next incremental extract from the same source, delivered after `shops_90d.csv`. Same columns. |
+| `shops_90d.csv.gz` | 90 consecutive days of history, 2024-12-21 to 2025-03-20. |
+| `delta.csv.gz` | The next incremental extract from the same source, delivered after `shops_90d.csv.gz`. Same columns. |
 
-Both files are UTF-8, comma-separated, with a header row. Fields containing commas are quoted.
+Both files are gzip-compressed UTF-8, comma-separated, with a header row. Fields containing commas are quoted.
 
 ## Grain
 

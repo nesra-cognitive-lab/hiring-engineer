@@ -10,7 +10,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "httpx2",
+    "httpx2",  # Starlette's TestClient now uses httpx2, the successor to httpx
     "pytest>=8",
 ]
 
